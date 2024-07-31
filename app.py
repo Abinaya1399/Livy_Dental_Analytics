@@ -92,8 +92,14 @@ def confirm_process():
         for filename in os.listdir(PROCESS_FOLDER):
             if filename.endswith('.xlsx') or filename.endswith('.csv'):
                 file_path = os.path.join(PROCESS_FOLDER, filename)
-                account_type_key = filename.split('_')[0]
-                mapped_account_type = ACCOUNT_TYPE_MAP.get(account_type_key, account_type_key)
+                # account_type_key = filename.split('_')[0]
+                # mapped_account_type = ACCOUNT_TYPE_MAP.get(account_type_key, account_type_key)
+                for key in ACCOUNT_TYPE_MAP.keys():
+                    if key in filename:
+                        mapped_account_type = ACCOUNT_TYPE_MAP[key]
+                        break
+                else:
+                    mapped_account_type = "Unknown"
                 date_str = filename.split('_')[-1].split('.')[0]
                 year = date_str[:4]
 
