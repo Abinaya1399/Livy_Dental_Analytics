@@ -6,7 +6,7 @@ import logging
 import secrets
 from flask_session import Session
 from datetime import datetime
-from config import ACCOUNT_TYPE_MAP, LOGIN_CREDENTIALS
+from config import ACCOUNT_TYPE_MAP, LOGIN_CREDENTIALS, PROCESS_FOLDER, ARCHIVE_FOLDER
 import hashlib
 import pandas as pd
 import mysql.connector
@@ -17,9 +17,6 @@ app.secret_key = secrets.token_hex(16)
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = './flask_session'
 Session(app)
-
-PROCESS_FOLDER = '/Users/abi/LivyDental/Reporting/Incoming/Process'
-ARCHIVE_FOLDER = '/Users/abi/LivyDental/Reporting/Incoming/Archive'
 
 db_config = {
     'user': 'root',
