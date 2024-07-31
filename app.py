@@ -268,13 +268,19 @@ def create_reporting_table(account_type, year):
         staging_df['actual_date'] = staging_df['posting_date']
 
         for index, row in staging_df.iterrows():
-            cursor.execute(
-                """
-                INSERT INTO reporting_table (year, quarter, month, actual_date, account_type, category, sub_category, amount)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (row['year'], row['quarter'], row['month'], row['actual_date'], row['account_type'], row['Category'], row['Sub-Category'], row['amount'])
-            )
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO reporting_table (id, year, quarter, month, actual_date, account_type, category, sub_category, amount)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (row['id'], row['year'], row['quarter'], row['month'], row['actual_date'], row['account_type'], row['Category'], row['Sub-Category'], row['amount'])
+                )
+            except mysql.connector.IntegrityError as e:
+                if e.errno == 1062:  # Duplicate entry error code for MySQL
+                    logger.info(f"Duplicate record found for id {row['id']} in account {account_type}")
+                    continue  # Skip duplicate entry and continue with the next record
+
 
         conn.commit()
         cursor.close()
