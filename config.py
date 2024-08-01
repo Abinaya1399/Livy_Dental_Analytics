@@ -13,3 +13,5 @@ LOGIN_CREDENTIALS = {
 
 PROCESS_FOLDER = '/Users/abi/LivyDental/Reporting/Incoming/Process'
 ARCHIVE_FOLDER = '/Users/abi/LivyDental/Reporting/Incoming/Archive'
+
+DASHBOARD_URL = "https://app.powerbi.com/groups/me/dashboards/22bceb17-38b8-4ed5-a92a-889d486bd099?experience=power-bi&clientSideAuth=0&refreshAccessToken=true"

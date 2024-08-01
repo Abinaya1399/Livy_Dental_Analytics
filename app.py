@@ -6,7 +6,7 @@ import logging
 import secrets
 from flask_session import Session
 from datetime import datetime
-from config import ACCOUNT_TYPE_MAP, LOGIN_CREDENTIALS, PROCESS_FOLDER, ARCHIVE_FOLDER
+from config import ACCOUNT_TYPE_MAP, LOGIN_CREDENTIALS, PROCESS_FOLDER, ARCHIVE_FOLDER, DASHBOARD_URL
 import hashlib
 import pandas as pd
 import mysql.connector
@@ -100,11 +100,11 @@ def confirm_process():
                         break
                 else:
                     mapped_account_type = "Unknown"
-                date_str = filename.split('_')[-1].split('.')[0]
-                year = date_str[:4]
+                # date_str = filename.split('_')[-1].split('.')[0]
+                # year = date_str[:4]
 
 
-                status = process_file(file_path, mapped_account_type, year)
+                status = process_file(file_path, mapped_account_type)
                 if status == "success":
                     files_processed.append(filename)
                 elif status == "duplicate":
@@ -136,7 +136,7 @@ def confirm_process():
         flash(f"Error processing files: {e}", 'danger')
         return redirect(url_for('process_files'))
 
-def process_file(file_path, account_type, year):
+def process_file(file_path, account_type):
     try:
         file_hash_key = generate_file_hash_key(file_path)
         file_name = os.path.basename(file_path)
@@ -151,13 +151,24 @@ def process_file(file_path, account_type, year):
 
 
         cursor.execute(
-            "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, year, processed_date) VALUES (%s, %s, %s, %s, %s, NOW())",
-            (file_path, file_name, file_hash_key, account_type, year)
+            "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, processed_date) VALUES (%s, %s, %s, %s, NOW())",
+            (file_path, file_name, file_hash_key, account_type)
         )
         conn.commit()
 
 
         original_df = pd.read_excel(file_path)
+
+        # Convert 'Posting Date' to datetime format
+        original_df['Posting Date'] = pd.to_datetime(original_df['Posting Date'], errors='coerce')
+
+        # Drop rows with invalid dates if necessary
+        original_df.dropna(subset=['Posting Date'], inplace=True)
+
+        # Extract the year from the 'Posting Date' column
+        year = original_df['Posting Date'].dt.year.mode()[0]
+        year = int(year)
+
         save_to_staging_table(original_df, account_type, year)
         create_reporting_table(account_type, year)
 
@@ -303,7 +314,6 @@ def assign_category_subcategory_keyword(description, conn):
             return row['category'], row['sub_category']
     return None, None
 
-DASHBOARD_URL = "https://app.powerbi.com/groups/me/dashboards/22bceb17-38b8-4ed5-a92a-889d486bd099?experience=power-bi&clientSideAuth=0&refreshAccessToken=true"
 
 @app.route('/view_dashboard')
 def view_dashboard():
