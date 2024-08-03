@@ -96,7 +96,7 @@ def confirm_process():
                 else:
                     mapped_account_type = "Unknown"
 
-                status, duplicates = process_file(file_path, mapped_account_type)
+                status, duplicates, missing_rows_message = process_file(file_path, mapped_account_type)
                 if status == "success":
                     files_processed.append(filename)
                 elif status == "duplicate":
@@ -132,6 +132,9 @@ def confirm_process():
             duplicate_summary_message += "</ul></div>"
             flash(duplicate_summary_message, 'warning')
 
+        if missing_rows_message:
+            flash(missing_rows_message, 'danger')
+
         if not files_processed and not duplicate_files:
             flash("No files to process!", 'info')
 
@@ -152,7 +155,7 @@ def process_file(file_path, account_type):
         cursor.execute("SELECT COUNT(*) FROM file_hashes WHERE hash_key = %s", (file_hash_key,))
         if cursor.fetchone()[0] > 0:
             logger.info(f"File {file_path} has already been processed. Skipping.")
-            return "duplicate", None
+            return "duplicate", None, None
 
         cursor.execute(
             "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, processed_date) VALUES (%s, %s, %s, %s, NOW())",
@@ -172,12 +175,12 @@ def process_file(file_path, account_type):
         year = original_df['Posting Date'].dt.year.mode()[0]
         year = int(year)
 
-        duplicates_summary = save_to_staging_table(original_df, account_type, year)
+        duplicates_summary, missing_rows_message = save_to_staging_table(original_df, account_type, year)
         create_reporting_table(account_type, year)
 
         cursor.close()
         conn.close()
-        return "success", duplicates_summary
+        return "success", duplicates_summary, missing_rows_message
     except Exception as e:
         logger.error(f"Error processing file: {e}")
         raise
@@ -221,7 +224,7 @@ def save_to_staging_table(df, account_type, year):
                 row_hash VARCHAR(64) UNIQUE
             )
         """)
-
+        original_row_count = len(df)
         duplicate_ids = []
         duplicate_dates = []
         for index, row in df.iterrows():
@@ -241,6 +244,15 @@ def save_to_staging_table(df, account_type, year):
                 duplicate_dates.append(existing_row[1])
 
         conn.commit()
+
+        # Check if the number of rows inserted matches the original DataFrame
+        cursor.execute("SELECT COUNT(*) FROM staging_table WHERE account_type = %s AND year = %s", (account_type, year))
+        inserted_row_count = cursor.fetchone()[0]
+        missing_rows_count = original_row_count - (inserted_row_count - len(duplicate_ids))
+        missing_rows_message = None
+        if missing_rows_count > 0:
+            missing_rows_message = f"{missing_rows_count} rows were not added to the staging table out of {original_row_count} rows."
+
         cursor.close()
         conn.close()
         logger.info("Data successfully saved to staging table.")
@@ -248,8 +260,8 @@ def save_to_staging_table(df, account_type, year):
         if duplicate_ids:
             min_date = min(duplicate_dates).strftime('%B %Y')
             max_date = max(duplicate_dates).strftime('%B %Y')
-            return {account_type: (min_date, max_date)}
-        return {}
+            return {account_type: (min_date, max_date)}, missing_rows_message
+        return {}, missing_rows_message
     except Exception as e:
         logger.error(f"Error saving to staging table: {e}")
         raise
