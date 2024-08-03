@@ -86,6 +86,8 @@ def confirm_process():
         files_processed = []
         duplicate_files = []
         duplicate_summary = {}
+        columns_errors = []
+        # missing_rows_messages = []
         for filename in os.listdir(PROCESS_FOLDER):
             if filename.endswith('.xlsx') or filename.endswith('.csv'):
                 file_path = os.path.join(PROCESS_FOLDER, filename)
@@ -96,11 +98,16 @@ def confirm_process():
                 else:
                     mapped_account_type = "Unknown"
 
-                status, duplicates, missing_rows_message = process_file(file_path, mapped_account_type)
+                status, duplicates, message = process_file(file_path, mapped_account_type)
                 if status == "success":
                     files_processed.append(filename)
                 elif status == "duplicate":
                     duplicate_files.append(filename)
+                elif status == "error":
+                    # if "Column mismatch" in message:
+                    columns_errors.append(message)
+                    # else:
+                    #     missing_rows_messages.append(message)
                 if duplicates:
                     for account, date_range in duplicates.items():
                         if account in duplicate_summary:
@@ -132,8 +139,13 @@ def confirm_process():
             duplicate_summary_message += "</ul></div>"
             flash(duplicate_summary_message, 'warning')
 
-        if missing_rows_message:
-            flash(missing_rows_message, 'danger')
+        if columns_errors:
+            for error in columns_errors:
+                flash(error, 'danger')
+
+        # if missing_rows_messages:
+        #     for missing_rows_message in missing_rows_messages:
+        #         flash(missing_rows_message, 'danger')
 
         if not files_processed and not duplicate_files:
             flash("No files to process!", 'info')
@@ -143,7 +155,6 @@ def confirm_process():
         logger.error(f"Error processing files: {e}")
         flash(f"Error processing files: {e}", 'danger')
         return redirect(url_for('process_files'))
-
 
 def process_file(file_path, account_type):
     try:
@@ -155,7 +166,7 @@ def process_file(file_path, account_type):
         cursor.execute("SELECT COUNT(*) FROM file_hashes WHERE hash_key = %s", (file_hash_key,))
         if cursor.fetchone()[0] > 0:
             logger.info(f"File {file_path} has already been processed. Skipping.")
-            return "duplicate", None, None
+            return "duplicate", None, None  # Ensure three values are returned
 
         cursor.execute(
             "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, processed_date) VALUES (%s, %s, %s, %s, NOW())",
@@ -163,7 +174,21 @@ def process_file(file_path, account_type):
         )
         conn.commit()
 
-        original_df = pd.read_excel(file_path)
+        original_df = pd.read_excel(file_path, engine='openpyxl')
+
+        # Define expected columns
+        expected_columns = ['Details', 'Posting Date', 'Description', 'Amount', 'Type', 'Balance', 'Check or Slip #']
+
+        # Validate columns
+        if list(original_df.columns) != expected_columns:
+            # missing_columns = set(expected_columns) - set(original_df.columns)
+            # extra_columns = set(original_df.columns) - set(expected_columns)
+            columns_message = f"Column mismatch found. Verify the original sheet once before uploading again."
+            cursor.execute("DELETE FROM file_hashes WHERE hash_key = %s", (file_hash_key,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return "error", None, columns_message
 
         # Convert 'Posting Date' to datetime format
         original_df['Posting Date'] = pd.to_datetime(original_df['Posting Date'], errors='coerce')
@@ -175,12 +200,14 @@ def process_file(file_path, account_type):
         year = original_df['Posting Date'].dt.year.mode()[0]
         year = int(year)
 
-        duplicates_summary, missing_rows_message = save_to_staging_table(original_df, account_type, year)
+        duplicates_summary = save_to_staging_table(original_df, account_type, year)
+        
+
         create_reporting_table(account_type, year)
 
         cursor.close()
         conn.close()
-        return "success", duplicates_summary, missing_rows_message
+        return "success", duplicates_summary, None
     except Exception as e:
         logger.error(f"Error processing file: {e}")
         raise
@@ -224,7 +251,6 @@ def save_to_staging_table(df, account_type, year):
                 row_hash VARCHAR(64) UNIQUE
             )
         """)
-        original_row_count = len(df)
         duplicate_ids = []
         duplicate_dates = []
         for index, row in df.iterrows():
@@ -245,13 +271,13 @@ def save_to_staging_table(df, account_type, year):
 
         conn.commit()
 
-        # Check if the number of rows inserted matches the original DataFrame
-        cursor.execute("SELECT COUNT(*) FROM staging_table WHERE account_type = %s AND year = %s", (account_type, year))
-        inserted_row_count = cursor.fetchone()[0]
-        missing_rows_count = original_row_count - (inserted_row_count - len(duplicate_ids))
-        missing_rows_message = None
-        if missing_rows_count > 0:
-            missing_rows_message = f"{missing_rows_count} rows were not added to the staging table out of {original_row_count} rows."
+        # # Check if the number of rows inserted matches the original DataFrame
+        # cursor.execute("SELECT COUNT(*) FROM staging_table WHERE account_type = %s AND year = %s", (account_type, year))
+        # inserted_row_count = cursor.fetchone()[0]
+        # missing_rows_count = original_row_count - (inserted_row_count - len(duplicate_ids))
+        # missing_rows_message = None
+        # if missing_rows_count > 0:
+        #     missing_rows_message = f"{missing_rows_count} rows were not added to the staging table out of {original_row_count} rows."
 
         cursor.close()
         conn.close()
@@ -260,8 +286,8 @@ def save_to_staging_table(df, account_type, year):
         if duplicate_ids:
             min_date = min(duplicate_dates).strftime('%B %Y')
             max_date = max(duplicate_dates).strftime('%B %Y')
-            return {account_type: (min_date, max_date)}, missing_rows_message
-        return {}, missing_rows_message
+            return {account_type: (min_date, max_date)}
+        return {}
     except Exception as e:
         logger.error(f"Error saving to staging table: {e}")
         raise
