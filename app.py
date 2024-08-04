@@ -158,6 +158,13 @@ def confirm_process():
 
 def process_file(file_path, account_type):
     try:
+        if file_path.endswith('.xlsx'):
+            original_df = pd.read_excel(file_path)
+        elif file_path.endswith('.csv'):
+            original_df = pd.read_csv(file_path)
+        else:
+            raise ValueError("Unsupported file format")
+
         file_hash_key = generate_file_hash_key(file_path)
         file_name = os.path.basename(file_path)
 
@@ -168,13 +175,13 @@ def process_file(file_path, account_type):
             logger.info(f"File {file_path} has already been processed. Skipping.")
             return "duplicate", None, None  # Ensure three values are returned
 
-        cursor.execute(
-            "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, processed_date) VALUES (%s, %s, %s, %s, NOW())",
-            (file_path, file_name, file_hash_key, account_type)
-        )
+        # cursor.execute(
+        #     "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, processed_date) VALUES (%s, %s, %s, %s, NOW())",
+        #     (file_path, file_name, file_hash_key, account_type)
+        # )
         conn.commit()
 
-        original_df = pd.read_excel(file_path, engine='openpyxl')
+        # original_df = pd.read_excel(file_path, engine='openpyxl')
 
         # Define expected columns
         expected_columns = ['Details', 'Posting Date', 'Description', 'Amount', 'Type', 'Balance', 'Check or Slip #']
@@ -193,6 +200,18 @@ def process_file(file_path, account_type):
         # Convert 'Posting Date' to datetime format
         original_df['Posting Date'] = pd.to_datetime(original_df['Posting Date'], errors='coerce')
 
+        original_df['Details'] = original_df['Details'].astype(str)
+        original_df['Description'] = original_df['Description'].astype(str)
+        original_df['Amount'] = pd.to_numeric(original_df['Amount'], errors='coerce')
+        original_df['Type'] = original_df['Type'].astype(str)
+        original_df['Balance'] = pd.to_numeric(original_df['Balance'], errors='coerce')
+        original_df['Check or Slip #'] = original_df['Check or Slip #'].astype(str)
+
+        logger.info(f"'Posting Date' column after conversion: {original_df['Posting Date']}")
+
+        # # Convert 'Posting Date' to datetime format
+        # original_df['Posting Date'] = pd.to_datetime(original_df['Posting Date'], errors='coerce')
+
         # Drop rows with invalid dates if necessary
         original_df.dropna(subset=['Posting Date'], inplace=True)
 
@@ -200,9 +219,14 @@ def process_file(file_path, account_type):
         year = original_df['Posting Date'].dt.year.mode()[0]
         year = int(year)
 
+        cursor.execute(
+            "INSERT INTO file_hashes (file_path, file_name, hash_key, account_type, processed_date) VALUES (%s, %s, %s, %s, NOW())",
+            (file_path, file_name, file_hash_key, account_type)
+        )
+        conn.commit()
+
         duplicates_summary = save_to_staging_table(original_df, account_type, year)
         
-
         create_reporting_table(account_type, year)
 
         cursor.close()
